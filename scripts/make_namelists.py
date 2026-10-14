@@ -31,13 +31,38 @@ def levels_from_met_em(path: Path) -> tuple[int, int]:
         )
     except (FileNotFoundError, subprocess.CalledProcessError) as exc:
         raise ValueError("Install ncdump (netcdf-bin) and check the met_em file.") from exc
-    levels = []
-    for field in ("num_metgrid_levels", "num_metgrid_soil_levels"):
-        match = re.search(rf"\b{field}\s*=\s*(\d+)\s*;", result.stdout)
-        if not match:
-            raise ValueError(f"Could not find {field} in {path}")
-        levels.append(int(match.group(1)))
-    return levels[0], levels[1]
+    header = result.stdout
+
+    def dimension(name: str) -> int | None:
+        match = re.search(rf"\b{re.escape(name)}\s*=\s*(\d+)\s*;", header)
+        return int(match.group(1)) if match else None
+
+    atmospheric = dimension("num_metgrid_levels")
+    if atmospheric is None:
+        raise ValueError(f"Could not find num_metgrid_levels in {path}")
+
+    # WPS met_em commonly defines soil dimensions num_st_layers and
+    # num_sm_layers, NOT num_metgrid_soil_levels. Do not silently assume 4.
+    soil = dimension("num_metgrid_soil_levels")
+    st = dimension("num_st_layers")
+    sm = dimension("num_sm_layers")
+    if soil is None:
+        if st is None or sm is None or st != sm:
+            raise ValueError(
+                f"Missing or inconsistent WPS soil temperature/moisture levels "
+                f"in {path}: num_st_layers={st}, num_sm_layers={sm}"
+            )
+        soil = st
+    elif (st is not None and st != soil) or (sm is not None and sm != soil):
+        raise ValueError(
+            f"Inconsistent met_em soil dimensions in {path}: "
+            f"num_metgrid_soil_levels={soil}, num_st_layers={st}, "
+            f"num_sm_layers={sm}"
+        )
+
+    if atmospheric < 2 or soil < 1:
+        raise ValueError(f"Invalid vertical dimensions: {atmospheric}, {soil}")
+    return atmospheric, soil
 
 
 def create_files(

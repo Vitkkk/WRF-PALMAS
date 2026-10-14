@@ -1,0 +1,50 @@
+name: WRF PALMAS V0.5 - GIF sem rerodar WRF
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "ID do run V0.5 com PNGs; ex. 38646460235"
+        required: true
+        default: "38646460235"
+        type: string
+  push:
+    paths:
+      - ".github/workflows/real-gfs-replot.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  gif-from-prior-artifact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Baixar PNGs da rodada real ja concluida
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.source_run_id || '38646460235' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: WRF-PALMAS-V05-REAL-GFS
+          path: recovered
+
+      - name: Gerar GIF dos PNGs SEM WRF e SEM GFS
+        run: |
+          python3 -m pip install --break-system-packages pillow
+          find recovered -name 't2_*.png' -print | sort
+          frames_dir="$(find recovered -name t2_000.png -printf '%h\n' | head -n 1)"
+          test -n "$frames_dir" || { echo "::error::Previous artifact has no temperature PNGs"; exit 1; }
+          python3 scripts/animate_existing_v05.py \
+            --png-dir "$frames_dir" \
+            --out results/v05/t2_anim.gif
+          test -s results/v05/t2_anim.gif
+
+      - name: Salvar GIF sem reprocessar a atmosfera
+        uses: actions/upload-artifact@v4
+        with:
+          name: WRF-PALMAS-V05-GIF-SEM-RERODAR
+          path: results/v05/t2_anim.gif
+          retention-days: 7

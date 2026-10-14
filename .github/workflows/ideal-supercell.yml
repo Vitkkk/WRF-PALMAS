@@ -1,4 +1,4 @@
-name: WRF PALMAS V0.2 - evolucao da supercelula idealizada
+name: WRF PALMAS V0.3 - vorticidade e refletividade proxy
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       duration_minutes:
         description: "Duracao meteorologica do teste"
         required: true
-        default: "60"
+        default: "120"
         type: choice
         options: ["30", "60", "120"]
       grid_points:
@@ -18,7 +18,7 @@ on:
       history_minutes:
         description: "Intervalo entre mapas"
         required: true
-        default: "10"
+        default: "15"
         type: choice
         options: ["10", "15", "30"]
   push:
@@ -35,9 +35,9 @@ jobs:
     env:
       NETCDF: /usr
       NETCDF_C: /usr
-      PALMAS_DURATION: ${{ inputs.duration_minutes || '60' }}
+      PALMAS_DURATION: ${{ inputs.duration_minutes || '120' }}
       PALMAS_GRID: ${{ inputs.grid_points || '82' }}
-      PALMAS_HISTORY: ${{ inputs.history_minutes || '10' }}
+      PALMAS_HISTORY: ${{ inputs.history_minutes || '15' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -165,10 +165,11 @@ jobs:
           fi
           ls -lh wrfout_d01_*
 
-      - name: Produzir mapas do W simulado
+      - name: Produzir mapas de W, vorticidade e refletividade aproximada
         run: |
           python3 -m pip install --user --break-system-packages netCDF4 numpy matplotlib
           python3 scripts/plot_ideal.py --run-dir wrf-src/test/em_quarter_ss --out-dir results/ideal-supercell
+          python3 scripts/diagnostics_v03.py --run-dir wrf-src/test/em_quarter_ss --out-dir results/ideal-supercell/v03
           python3 - <<'PY'
           import json, os
           from pathlib import Path
@@ -176,13 +177,17 @@ jobs:
           duration = int(os.environ["PALMAS_DURATION"])
           assert d["frame_count"] >= 2, f"Only {d['frame_count']} frame(s)"
           assert d["simulated_minutes"] == duration, (d["simulated_minutes"], duration)
-          print("Validated:", d["frame_count"], "frames,", duration, "minutes simulated.")
+          v03 = json.loads(Path("results/ideal-supercell/v03/diagnostics_summary.json").read_text())
+          assert v03["frame_count"] == d["frame_count"], (v03["frame_count"], d["frame_count"])
+          assert v03["simulated_minutes"] == duration
+          assert Path("results/ideal-supercell/v03/v03_vorticidade_e_chuva.gif").stat().st_size > 1000
+          print("V0.3 validated:", d["frame_count"], "frames,", duration, "minutes simulated.")
           PY
 
       - name: Registrar tempos
         if: always()
         run: |
-          echo "# WRF PALMAS - teste da supercelula idealizada" > test-report.txt
+          echo "# WRF PALMAS V0.3 - 120 min e diagnosticos convectivos" > test-report.txt
           echo "WRF 4.8.0 / em_quarter_ss / 2km / ${PALMAS_GRID}x${PALMAS_GRID} / ${PALMAS_DURATION} minutos meteorologicos" >> test-report.txt
           echo "Cache WRF: ${{ steps.compiled-cache.outputs.cache-hit }}" >> test-report.txt
           echo "History interval (min): $PALMAS_HISTORY" >> test-report.txt
@@ -196,7 +201,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: WRF-PALMAS-v0-2-supercelula
+          name: WRF-PALMAS-v0-3-supercelula
           path: |
             results/ideal-supercell/
             test-report.txt

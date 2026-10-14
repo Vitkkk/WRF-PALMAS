@@ -175,16 +175,15 @@ jobs:
       - name: Iniciar meteorologia real com real.exe
         working-directory: wrf-src/test/em_real
         run: |
-          python3 - <<'PY'
+          export FIRST_MET_EM="$(python3 - <<'PY'
           import os
           from pathlib import Path
           start = os.environ["GFS_START"].replace("T", "_") + ":00"
           path = Path(os.environ["GITHUB_WORKSPACE"]) / "wps-src" / ("met_em.d01." + start + ".nc")
           if not path.is_file(): raise SystemExit(f"Missing met_em file: {path}")
           print(path)
-          with open(os.environ["GITHUB_ENV"], "a") as f:
-              f.write(f"FIRST_MET_EM={path}\n")
           PY
+          )"
           python3 "$GITHUB_WORKSPACE/scripts/make_namelists.py" \
             --start "$GFS_START" --hours 3 --grid 81 --dx-km 9 \
             --lat -27.3 --lon -52.3 --geog "$PALMAS_GEOG" \

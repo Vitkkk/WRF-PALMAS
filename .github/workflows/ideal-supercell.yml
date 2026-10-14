@@ -1,0 +1,138 @@
+name: WRF PALMAS - primeira supercelula idealizada
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/ideal-supercell.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ideal-supercell:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    env:
+      NETCDF: /usr
+      NETCDF_C: /usr
+      NETCDF_classic: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar bibliotecas cientificas
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gfortran gcc g++ make m4 csh perl curl \
+            libnetcdf-dev libnetcdff-dev netcdf-bin libhdf5-dev zlib1g-dev
+          nf-config --version
+
+      - name: Baixar o codigo-fonte oficial WRF 4.8.0
+        run: |
+          curl -fL --retry 3 "https://github.com/wrf-model/WRF/releases/download/v4.8.0/v4.8.0.tar.gz" -o wrf.tar.gz
+          mkdir -p wrf-src
+          tar -xf wrf.tar.gz --strip-components=1 -C wrf-src
+          test -f wrf-src/configure
+
+      - name: Configurar GNU serial para caso idealizado
+        working-directory: wrf-src
+        run: |
+          printf '%s\n' '-1' | ./configure arw > ../configure-options.log 2>&1 || true
+          python3 - <<'PY'
+          import pathlib, re
+          s = pathlib.Path("../configure-options.log").read_text()
+          for line in s.splitlines():
+              if "GNU (gfortran/gcc)" in line:
+                  m = re.search(r"\b(\d+)\.\s+\(serial\)", line)
+                  if m:
+                      pathlib.Path("../compiler-choice.txt").write_text(m.group(1))
+                      print("Chosen:", line.strip())
+                      break
+          else:
+              print(s[-9000:])
+              raise SystemExit("GNU serial not found in WRF configuration")
+          PY
+          choice="$(cat ../compiler-choice.txt)"
+          printf '%s\n%s\n' "$choice" '0' | ./configure arw > ../configure.log 2>&1
+          test -f configure.wrf || { tail -n 100 ../configure.log; exit 1; }
+
+      - name: Compilar WRF real para supercelula idealizada
+        working-directory: wrf-src
+        run: |
+          start="$(date +%s)"
+          if ! ./compile em_quarter_ss -j 2 > ../compile.log 2>&1; then
+            tail -n 130 ../compile.log
+            exit 1
+          fi
+          echo "build_elapsed_seconds=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+          test -x main/wrf.exe && test -x main/ideal.exe
+          tail -n 30 ../compile.log
+
+      - name: Inicializar e rodar 30 min meteorologicos
+        working-directory: wrf-src/test/em_quarter_ss
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("namelist.input")
+          s = p.read_text()
+          s, n1 = re.subn(r"(?m)^(\s*run_minutes\s*=)\s*60,", r"\g<1> 30,", s)
+          s, n2 = re.subn(r"(?m)^(\s*end_minute\s*=)\s*120,\s*120,\s*120,", r"\g<1> 30, 30, 30,", s)
+          s, n3 = re.subn(r"(?m)^(\s*history_interval\s*=)\s*30,\s*10,\s*10,", r"\g<1> 10, 10, 10,", s)
+          if (n1, n2, n3) != (1, 1, 1):
+              raise SystemExit("Original WRF namelist did not match known version")
+          p.write_text(s)
+          PY
+          start="$(date +%s)"
+          if ! ./ideal.exe > "$GITHUB_WORKSPACE/ideal.log" 2>&1; then
+            tail -n 100 "$GITHUB_WORKSPACE/ideal.log"
+            exit 1
+          fi
+          test -s wrfinput_d01
+          echo "ideal_elapsed_seconds=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+          start="$(date +%s)"
+          if ! ./wrf.exe > "$GITHUB_WORKSPACE/integration.log" 2>&1; then
+            tail -n 100 "$GITHUB_WORKSPACE/integration.log"
+            tail -n 100 rsl.error.0000 2>/dev/null || true
+            exit 1
+          fi
+          echo "integration_elapsed_seconds=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+          if ! ( grep -q "SUCCESS COMPLETE WRF" "$GITHUB_WORKSPACE/integration.log" ||
+                 grep -q "SUCCESS COMPLETE WRF" rsl.out.0000 ); then
+            tail -n 80 "$GITHUB_WORKSPACE/integration.log"
+            exit 1
+          fi
+          ls -lh wrfout_d01_*
+
+      - name: Produzir mapas do W simulado
+        run: |
+          python3 -m pip install --user --break-system-packages netCDF4 numpy matplotlib
+          python3 scripts/plot_ideal.py --run-dir wrf-src/test/em_quarter_ss --out-dir results/ideal-supercell
+
+      - name: Registrar tempos
+        if: always()
+        run: |
+          echo "# WRF PALMAS - teste da supercelula idealizada" > test-report.txt
+          echo "WRF 4.8.0 / em_quarter_ss / 2km / 42x42 / 30 minutos meteorologicos" >> test-report.txt
+          echo "Compilacao (segundos): $build_elapsed_seconds" >> test-report.txt
+          echo "Inicializador (segundos): $ideal_elapsed_seconds" >> test-report.txt
+          echo "Integracao WRF (segundos): $integration_elapsed_seconds" >> test-report.txt
+          echo "NAO e previsao real ou operacional da America do Sul." >> test-report.txt
+          cat test-report.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Anexar mapas e logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WRF-PALMAS-primeira-supercelula
+          path: |
+            results/ideal-supercell/
+            test-report.txt
+            configure-options.log
+            configure.log
+            compile.log
+            ideal.log
+            integration.log
+            wrf-src/test/em_quarter_ss/rsl.error.0000
+          retention-days: 7
+          if-no-files-found: warn

@@ -16,7 +16,6 @@ jobs:
     env:
       NETCDF: /usr
       NETCDF_C: /usr
-      NETCDF_classic: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +25,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends gfortran gcc g++ make m4 csh perl curl \
             libnetcdf-dev libnetcdff-dev netcdf-bin libhdf5-dev zlib1g-dev
           nf-config --version
+          echo "NetCDF Fortran linker flags:"
+          nf-config --flibs
+          nc-config --libs
+          test "$(nf-config --has-nc4)" = yes
 
       - name: Baixar o codigo-fonte oficial WRF 4.8.0
         run: |
@@ -55,6 +58,12 @@ jobs:
           choice="$(cat ../compiler-choice.txt)"
           printf '%s\n%s\n' "$choice" '0' | ./configure arw > ../configure.log 2>&1
           test -f configure.wrf || { tail -n 100 ../configure.log; exit 1; }
+          # NetCDF4 linking is required; classic mode previously lost libnetcdff.
+          if ! grep -q -- '-lnetcdff' configure.wrf; then
+            echo "::error::NetCDF-Fortran link flags missing in configure.wrf"
+            grep -n -E "NETCDF|LIB_LOCAL|LIB_EXTERNAL" configure.wrf | tail -n 35
+            exit 1
+          fi
 
       - name: Compilar WRF real para supercelula idealizada
         working-directory: wrf-src
@@ -65,7 +74,17 @@ jobs:
             exit 1
           fi
           echo "build_elapsed_seconds=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
-          test -x main/wrf.exe && test -x main/ideal.exe
+          # WRF's compile can exit 0 even when the linker failed (ignored make errors).
+          # Every binary must be present and executable; do not use && in shell -e guard.
+          if ! test -x main/wrf.exe || ! test -x main/ideal.exe; then
+            echo "::error::WRF executables missing - inspect real link error below"
+            grep -E -m 15 'undefined reference|collect2: error|No such file|Problems building' ../compile.log || true
+            tail -n 70 ../compile.log
+            exit 1
+          fi
+          test -x test/em_quarter_ss/wrf.exe
+          test -x test/em_quarter_ss/ideal.exe
+          echo "Link succeeded - both executable binaries exist."
           tail -n 30 ../compile.log
 
       - name: Inicializar e rodar 30 min meteorologicos
@@ -131,6 +150,7 @@ jobs:
             configure-options.log
             configure.log
             compile.log
+            wrf-src/configure.wrf
             ideal.log
             integration.log
             wrf-src/test/em_quarter_ss/rsl.error.0000

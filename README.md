@@ -4,7 +4,7 @@ Modelo meteorológico regional experimental para estudos de convecção e tempo 
 
 ## Estado do projeto
 
-**v0.1 — infraestrutura de experimentos.** Este repositório contém gerador de configurações para **WRF-ARW e WPS oficiais** e um cronômetro para executar a primeira simulação curta em computador Linux. **Não é o código-fonte do WRF e ainda não é uma previsão operacional.** Nenhuma rodada física foi executada ou validada neste repositório.
+**V0.4 — laboratório de supercélulas idealizadas em funcionamento.** Este repositório contém geradores de configurações WRF/WPS e workflows no GitHub Actions que já concluíram integrações ideais de supercélulas. A V0.4 adiciona mapas de W, vorticidade e refletividade de chuva aproximada em três painéis, além de uma grade ampliada. **Ainda não executa previsão operacional nem simulação regional alimentada por GFS.**
 
 
 ## Primeiro teste do motor: supercélula idealizada (sem GFS)
@@ -14,6 +14,13 @@ O workflow [WRF PALMAS - primeira supercelula idealizada](.github/workflows/idea
 Abra **Actions** > **WRF PALMAS - primeira supercelula idealizada** para acompanhar e, quando concluir, baixe o artifact **WRF-PALMAS-primeira-supercelula**: contém mapas de velocidade vertical W, sumário JSON, tempos de execução e logs. A compilação inicial pode levar dezenas de minutos (o guia oficial estima 10–60 min); a integração pode ser bem mais rápida.
 
 A rotina foi concebida para começar barato e debugar a infraestrutura. A etapa seguinte usa o gerador de configuração regional de 9 km com WPS + GFS e dados reais. **Não trate os mapas idealizados como previsão ou evidência de um tornado real.**
+
+## V0.4 — paleta de radar e painel triplo
+
+Experimento idealizado com **122 × 122 pontos a 2 km**, **120 minutos** e mapas a cada **15 minutos**. Mostra W máximo colunar, vorticidade vertical relativa ~1 km AGL e refletividade aproximada só de chuva, em uma **paleta escalonada inspirada em radares** e com contornos de W. A execução do workflow V0.4 deve concluir antes de afirmar que os produtos estão validados.
+
+- [Guia técnico da V0.4](docs/V04.md)
+- [Workflow do modelo e artifacts](.github/workflows/ideal-supercell.yml)
 
 ## V0.3 — rotação e refletividade aproximada
 

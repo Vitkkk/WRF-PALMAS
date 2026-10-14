@@ -14,6 +14,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install numpy for physical diagnostic unit tests
+        run: python -m pip install numpy
       - name: Compile Python scripts
         run: python -m compileall -q scripts tests
       - name: Check generated namelists

@@ -71,7 +71,7 @@ def create_files(
  j_parent_start = 1,
  e_we = {grid},
  e_sn = {grid},
- geog_data_res = 'default',
+ geog_data_res = 'lowres',
  dx = {dx},
  dy = {dx},
  map_proj = 'lambert',

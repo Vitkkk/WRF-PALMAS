@@ -54,6 +54,14 @@ jobs:
           test -s geog-location.txt || { echo "Geographic topo_gmted2010_5m missing"; exit 1; }
           geogdir="$(realpath "$(dirname "$(head -n 1 geog-location.txt)")")"
           echo "PALMAS_GEOG=$geogdir" >> "$GITHUB_ENV"
+          # WPS low-res test bundle must match GEOGRID.TBL's lowres labels.
+          for dataset in topo_gmted2010_5m modis_landuse_20class_5m_with_lakes; do
+            test -s "$geogdir/$dataset/index" || {
+              echo "::error::Missing lowres geography: $geogdir/$dataset/index"
+              find "$geogdir" -mindepth 1 -maxdepth 2 -name index | head -n 20
+              exit 1
+            }
+          done
           du -sh geog
           df -h .
 
@@ -188,6 +196,10 @@ jobs:
             --lat -27.3 --lon -52.3 --geog "$PALMAS_GEOG" \
             --out "$GITHUB_WORKSPACE/pilot"
           cp "$GITHUB_WORKSPACE/pilot/namelist.wps" namelist.wps
+          grep -Fq "geog_data_res = 'lowres'" namelist.wps || {
+            echo "::error::WPS namelist must use the lowres static dataset"
+            exit 1
+          }
           ln -sfn ungrib/Variable_Tables/Vtable.GFS Vtable
           ./geogrid.exe > "$GITHUB_WORKSPACE/geogrid.log" 2>&1 || {
             tail -n 90 "$GITHUB_WORKSPACE/geogrid.log"; exit 1;

@@ -20,10 +20,10 @@ def _replace_once(text: str, pattern: str, replacement: str) -> str:
 
 def make_namelist(source: str, duration_minutes: int, grid_points: int,
                   history_minutes: int) -> str:
-    if duration_minutes not in (30, 60, 120):
-        raise ValueError("duration must be 30, 60 or 120 min")
-    if grid_points not in (42, 82):
-        raise ValueError("grid must be 42 or 82 points")
+    if duration_minutes not in (30, 60, 120, 180):
+        raise ValueError("duration must be 30, 60, 120 or 180 min")
+    if grid_points not in (42, 82, 122, 162):
+        raise ValueError("grid must be 42, 82, 122 or 162 points")
     if history_minutes not in (10, 15, 30):
         raise ValueError("history must be 10, 15 or 30 min")
     if duration_minutes % history_minutes != 0:
@@ -50,9 +50,9 @@ def make_namelist(source: str, duration_minutes: int, grid_points: int,
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--namelist", type=Path, required=True)
-    ap.add_argument("--duration", type=int, default=60)
-    ap.add_argument("--grid", type=int, default=82)
-    ap.add_argument("--history", type=int, default=10)
+    ap.add_argument("--duration", type=int, default=120)
+    ap.add_argument("--grid", type=int, default=122)
+    ap.add_argument("--history", type=int, default=15)
     args = ap.parse_args()
     source = args.namelist.read_text()
     modified = make_namelist(source, args.duration, args.grid, args.history)

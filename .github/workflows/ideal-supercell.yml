@@ -186,7 +186,12 @@ jobs:
           v04 = json.loads((v04_dir / "summary_v04.json").read_text())
           assert v04["frame_count"] == d["frame_count"], (v04["frame_count"], d["frame_count"])
           assert v04["simulated_minutes"] == duration, (v04["simulated_minutes"], duration)
-          assert v04["grid_cells"] == [int(os.environ["PALMAS_GRID"])]*2
+          # WRF e_we/e_sn include the staggered boundary; WRF mass fields have N-1.
+          expected_mass_grid = int(os.environ["PALMAS_GRID"]) - 1
+          assert v04["grid_cells"] == [expected_mass_grid]*2, (
+              "WRF mass-grid dimensions", v04["grid_cells"],
+              "expected", [expected_mass_grid]*2,
+          )
           assert (v04_dir / "wrf_palmas_v04_triplo.gif").stat().st_size > 1000
           assert len(list(v04_dir.glob("palmas_v04_t*.png"))) == d["frame_count"]
           print("V0.4 validated:", d["frame_count"], "frames,", duration,

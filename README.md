@@ -15,6 +15,15 @@ Abra **Actions** > **WRF PALMAS - primeira supercelula idealizada** para acompan
 
 A rotina foi concebida para começar barato e debugar a infraestrutura. A etapa seguinte usa o gerador de configuração regional de 9 km com WPS + GFS e dados reais. **Não trate os mapas idealizados como previsão ou evidência de um tornado real.**
 
+## V0.5 — primeira simulação geográfica com GFS real
+
+**Em teste:** um workflow separado do caso idealizado baixa os arquivos GFS de 0 h e +3 h, obtém a geografia WPS de baixa resolução, compila WRF-ARW 4.8 `em_real` e WPS, e tenta integrar uma previsão experimental de 3 horas a 9 km sobre o oeste de SC / norte do RS. **A pipeline ainda não foi validada até o fim; consulte o status do GitHub Actions.** As cartas meteorológicas só existem se a integração real finalizar.
+
+- [Guia técnico V0.5](docs/V05.md)
+- [Iniciar / acompanhar WRF PALMAS GFS real](.github/workflows/real-gfs-v05.yml)
+
+A geografia de baixa resolução é **somente para teste** e os produtos não constituem previsão operacional ou sistema de alerta.
+
 ## V0.4 — paleta de radar e painel triplo
 
 Experimento idealizado com **122 × 122 pontos a 2 km**, **120 minutos** e mapas a cada **15 minutos**. Mostra W máximo colunar, vorticidade vertical relativa ~1 km AGL e refletividade aproximada só de chuva, em uma **paleta escalonada inspirada em radares** e com contornos de W. A execução do workflow V0.4 deve concluir antes de afirmar que os produtos estão validados.

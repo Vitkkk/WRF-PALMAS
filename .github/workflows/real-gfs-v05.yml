@@ -8,9 +8,6 @@ on:
         required: false
         type: string
         default: ""
-  push:
-    paths:
-      - ".github/workflows/real-gfs-v05.yml"
 
 permissions:
   contents: read
@@ -360,6 +357,13 @@ jobs:
               tail -n 90 "$GITHUB_WORKSPACE/wrf-real.log"; exit 1;
             }
           ls -lh wrfout_d01_*
+
+      - name: Guardar wrfout para plotagens SEM nova simulacao
+        uses: actions/cache/save@v4
+        with:
+          path: wrf-src/test/em_real/wrfout_d01_*
+          # Same cycle, grid, resolution, physics and WRF version; bump v1 if any change.
+          key: palmas-v05-wrfout-${{ env.GFS_DAY }}-12z-9km-81-lowres-thompson-v1
 
       - name: Plotar mapas geograficos de temperatura e vento
         run: |

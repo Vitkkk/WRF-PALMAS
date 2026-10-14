@@ -15,6 +15,13 @@ Abra **Actions** > **WRF PALMAS - primeira supercelula idealizada** para acompan
 
 A rotina foi concebida para começar barato e debugar a infraestrutura. A etapa seguinte usa o gerador de configuração regional de 9 km com WPS + GFS e dados reais. **Não trate os mapas idealizados como previsão ou evidência de um tornado real.**
 
+## V0.2 — animação e experimentos rápidos
+
+A versão V0.2 já inclui renderização **de todos os horários NetCDF**, PNGs por horário, GIF e gráfico temporal de velocidade vertical, medição de memória e cache de executáveis WRF em GitHub Actions. O padrão agora é **60 min de simulação idealizada, 82 × 82 pontos a 2 km e histórico a cada 10 min**. O ensaio está sujeito a confirmação de sucesso na CI; ainda não é uma previsão baseada em observações.
+
+- [Instruções da V0.2](docs/V02.md)
+- [Executar e acompanhar a V0.2 no GitHub Actions](.github/workflows/ideal-supercell.yml)
+
 ## Modo rápido
 
 - Domínio único d01, 81 x 81 pontos, 9 km de resolução (~720 x 720 km), centrado em -27.3, -52.3 (oeste de SC / norte do RS).

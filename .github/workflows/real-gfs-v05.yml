@@ -2,6 +2,12 @@ name: WRF PALMAS V0.5 - GFS real Sul do Brasil
 
 on:
   workflow_dispatch:
+    inputs:
+      gfs_day:
+        description: "GFS UTC day YYYYMMDD. Empty = yesterday. Same day reuses caches."
+        required: false
+        type: string
+        default: ""
   push:
     paths:
       - ".github/workflows/real-gfs-v05.yml"
@@ -31,25 +37,69 @@ jobs:
           test "$(nf-config --has-nc4)" = yes
           df -h .
 
-      - name: Selecionar ciclo GFS de ontem as 12Z
+      - name: Fixar ciclo GFS para repeticoes e cache
         run: |
-          echo "GFS_DAY=$(date -u -d yesterday +%Y%m%d)" >> "$GITHUB_ENV"
-          echo "GFS_START=$(date -u -d yesterday +%Y-%m-%d)T12:00" >> "$GITHUB_ENV"
-          echo "GFS cycle is previous UTC date at 12Z; historical test, NOT real-time forecast"
+          day="${{ inputs.gfs_day }}"
+          if [ -z "$day" ]; then day="$(date -u -d yesterday +%Y%m%d)"; fi
+          if ! [[ "$day" =~ ^[0-9]{8}$ ]]; then
+            echo "::error::Invalid UTC GFS day YYYYMMDD: $day"
+            exit 1
+          fi
+          iso="${day:0:4}-${day:4:2}-${day:6:2}"
+          test "$(date -u -d "$iso" +%Y%m%d 2>/dev/null)" = "$day" || {
+            echo "::error::Invalid calendar day $day"; exit 1;
+          }
+          echo "GFS_DAY=$day" >> "$GITHUB_ENV"
+          echo "GFS_START=${iso}T12:00" >> "$GITHUB_ENV"
+          echo "Using pinned GFS $day 12Z; cache is tied to this cycle"
 
-      - name: Baixar GRIB2 regionais NOAA GFS f000 e f003
+      - name: Restaurar GFS deste ciclo
+        id: gfs-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gfs
+          key: palmas-v05-gfs-${{ env.GFS_DAY }}-12z-subregion-v1
+
+      - name: Baixar GRIB2 regionais NOAA GFS f000 e f003 se necessario
+        if: steps.gfs-cache.outputs.cache-hit != 'true'
         run: |
           python3 scripts/download_gfs.py --day "$GFS_DAY" --cycle 12 --out gfs
           du -sh gfs
           file gfs/*
 
+      - name: Verificar dois GRIB antes de aproveitar cache
+        run: |
+          for h in 000 003; do
+            f="gfs/gfs.t12z.pgrb2.0p25.f$h"
+            test -s "$f" || { echo "::error::Missing GRIB $f"; exit 1; }
+            test "$(head -c 4 "$f")" = GRIB || { echo "::error::Invalid GRIB $f"; exit 1; }
+          done
+
+      - name: Guardar GFS para reutilizar com o mesmo ciclo
+        if: steps.gfs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: gfs
+          key: palmas-v05-gfs-${{ env.GFS_DAY }}-12z-subregion-v1
+
+      - name: Recuperar geografia WPS baixa resolucao
+        id: geog-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: geog
+          key: palmas-v05-wps-geog-lowres-mandatory-v1
+
       - name: Dados estaticos WPS baixa resolucao para teste
+        if: steps.geog-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p geog
           curl -fL --retry 3 --connect-timeout 30 --max-time 900 \
             https://www2.mmm.ucar.edu/wrf/src/wps_files/geog_low_res_mandatory.tar.gz \
             -o geog-min.tar.gz
           tar -xzf geog-min.tar.gz -C geog
+
+      - name: Verificar e selecionar geografia (baixada ou recuperada)
+        run: |
           find geog -type d -name topo_gmted2010_5m -print -quit > geog-location.txt
           test -s geog-location.txt || { echo "Geographic topo_gmted2010_5m missing"; exit 1; }
           geogdir="$(realpath "$(dirname "$(head -n 1 geog-location.txt)")")"
@@ -64,6 +114,13 @@ jobs:
           done
           du -sh geog
           df -h .
+
+      - name: Guardar geografia para os proximos testes
+        if: steps.geog-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: geog
+          key: palmas-v05-wps-geog-lowres-mandatory-v1
 
       - name: Baixar WRF 4.8 e WPS 4.7 oficiais
         run: |
@@ -132,7 +189,15 @@ jobs:
           test -s wrf-src/external/io_int/libwrfio_int.a
           echo "Full em_real WRF ready"
 
+      - name: Reutilizar WPS compilado quando possivel
+        id: wps-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: wps-src
+          key: palmas-v05-wps470-wrf480-ubuntu2404-netcdf-grib2-v1
+
       - name: Compilar WPS geogrid ungrib metgrid
+        if: steps.wps-cache.outputs.cache-hit != 'true'
         working-directory: wps-src
         run: |
           export WRF_DIR="$GITHUB_WORKSPACE/wrf-src"
@@ -188,7 +253,31 @@ jobs:
             test -x "$bin" || { echo "Missing WPS binary $bin"; tail -n 100 ../wps-compile.log; exit 1; }
           done
 
+      - name: Guardar WPS compilado ANTES de rodar geogrid
+        if: steps.wps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: wps-src
+          key: palmas-v05-wps470-wrf480-ubuntu2404-netcdf-grib2-v1
+
+      - name: Verificar WPS apos cache
+        run: |
+          for exe in geogrid.exe ungrib.exe metgrid.exe; do
+            test -x "wps-src/$exe" || {
+              echo "::error::Missing cached WPS executable: $exe"; exit 1;
+            }
+          done
+
+      - name: Restaurar met_em preparado para MESMO ciclo e dominio
+        id: met-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            wps-src/met_em.d01.*.nc
+          key: palmas-v05-metem-${{ env.GFS_DAY }}-12z-9km-81-lowres-v1
+
       - name: Calcular geografia e condicoes iniciais GFS
+        if: steps.met-cache.outputs.cache-hit != 'true'
         working-directory: wps-src
         run: |
           python3 "$GITHUB_WORKSPACE/scripts/make_namelists.py" \
@@ -213,6 +302,20 @@ jobs:
             tail -n 90 "$GITHUB_WORKSPACE/metgrid.log"; exit 1;
           }
           ls -lh met_em.d01.*.nc
+
+      - name: Verificar os met_em que alimentam real.exe
+        run: |
+          test -s "wps-src/met_em.d01.${GFS_START/T/_}:00.nc"
+          echo "Found first met_em for $GFS_START"
+          ls -lh wps-src/met_em.d01.*.nc
+
+      - name: Guardar met_em ANTES do real.exe
+        if: steps.met-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            wps-src/met_em.d01.*.nc
+          key: palmas-v05-metem-${{ env.GFS_DAY }}-12z-9km-81-lowres-v1
 
       - name: Iniciar meteorologia real com real.exe
         working-directory: wrf-src/test/em_real

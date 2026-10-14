@@ -31,6 +31,7 @@ class GenerateNamelistsTest(unittest.TestCase):
         self.assertIn("max_dom = 1", wps)
         self.assertIn("e_we = 81", wps)
         self.assertIn("dx = 9000", wps)
+        self.assertIn("geog_data_res = 'lowres'", wps)
         self.assertIn("run_hours = 3", wrf)
         self.assertIn("num_metgrid_levels = 34", wrf)
         self.assertEqual(json.loads((out / "config.json").read_text())["hours"], 3)

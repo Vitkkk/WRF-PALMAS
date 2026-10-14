@@ -6,6 +6,15 @@ Modelo meteorológico regional experimental para estudos de convecção e tempo 
 
 **v0.1 — infraestrutura de experimentos.** Este repositório contém gerador de configurações para **WRF-ARW e WPS oficiais** e um cronômetro para executar a primeira simulação curta em computador Linux. **Não é o código-fonte do WRF e ainda não é uma previsão operacional.** Nenhuma rodada física foi executada ou validada neste repositório.
 
+
+## Primeiro teste do motor: supercélula idealizada (sem GFS)
+
+O workflow [WRF PALMAS - primeira supercelula idealizada](.github/workflows/ideal-supercell.yml) compila o **WRF 4.8.0 oficial** no GitHub Actions e tenta integrar 30 minutos meteorológicos do teste oficial **em_quarter_ss** (grade de 2 km, 42 × 42 pontos). É uma **simulação atmosférica de verdade, mas com condições idealizadas**: não representa uma previsão do Sul do Brasil.
+
+Abra **Actions** > **WRF PALMAS - primeira supercelula idealizada** para acompanhar e, quando concluir, baixe o artifact **WRF-PALMAS-primeira-supercelula**: contém mapas de velocidade vertical W, sumário JSON, tempos de execução e logs. A compilação inicial pode levar dezenas de minutos (o guia oficial estima 10–60 min); a integração pode ser bem mais rápida.
+
+A rotina foi concebida para começar barato e debugar a infraestrutura. A etapa seguinte usa o gerador de configuração regional de 9 km com WPS + GFS e dados reais. **Não trate os mapas idealizados como previsão ou evidência de um tornado real.**
+
 ## Modo rápido
 
 - Domínio único d01, 81 x 81 pontos, 9 km de resolução (~720 x 720 km), centrado em -27.3, -52.3 (oeste de SC / norte do RS).

@@ -1,0 +1,21 @@
+name: Check WRF PALMAS configuration generator
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile Python scripts
+        run: python -m compileall -q scripts tests
+      - name: Check generated namelists
+        run: python -m unittest discover -s tests -v
+# Deliberately does NOT install WRF, download GFS, or run expensive simulations.

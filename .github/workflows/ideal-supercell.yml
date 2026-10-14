@@ -1,7 +1,26 @@
-name: WRF PALMAS - primeira supercelula idealizada
+name: WRF PALMAS V0.2 - evolucao da supercelula idealizada
 
 on:
   workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: "Duracao meteorologica do teste"
+        required: true
+        default: "60"
+        type: choice
+        options: ["30", "60", "120"]
+      grid_points:
+        description: "Pontos horizontais por lado (2 km)"
+        required: true
+        default: "82"
+        type: choice
+        options: ["42", "82"]
+      history_minutes:
+        description: "Intervalo entre mapas"
+        required: true
+        default: "10"
+        type: choice
+        options: ["10", "15", "30"]
   push:
     paths:
       - ".github/workflows/ideal-supercell.yml"
@@ -16,6 +35,9 @@ jobs:
     env:
       NETCDF: /usr
       NETCDF_C: /usr
+      PALMAS_DURATION: ${{ inputs.duration_minutes || '60' }}
+      PALMAS_GRID: ${{ inputs.grid_points || '82' }}
+      PALMAS_HISTORY: ${{ inputs.history_minutes || '10' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +58,17 @@ jobs:
           mkdir -p wrf-src
           tar -xf wrf.tar.gz --strip-components=1 -C wrf-src
           test -f wrf-src/configure
+
+      - name: Reutilizar compilacao anterior quando disponivel
+        id: compiled-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            wrf-src/main/wrf.exe
+            wrf-src/main/ideal.exe
+          # Cache only executable files, NOT large WRF build trees.
+          # Bump key after compiler, system library or WRF source changes.
+          key: wrf-palmas-480-ubuntu2404-gfortran-netcdf4-ideal-serial-v1
 
       - name: Configurar GNU serial para caso idealizado
         working-directory: wrf-src
@@ -65,7 +98,8 @@ jobs:
             exit 1
           fi
 
-      - name: Compilar WRF real para supercelula idealizada
+      - name: Compilar WRF apenas se nao houver cache
+        if: steps.compiled-cache.outputs.cache-hit != 'true'
         working-directory: wrf-src
         run: |
           start="$(date +%s)"
@@ -87,21 +121,28 @@ jobs:
           echo "Link succeeded - both executable binaries exist."
           tail -n 30 ../compile.log
 
-      - name: Inicializar e rodar 30 min meteorologicos
+      - name: Conferir executaveis e preparar atalhos
+        working-directory: wrf-src
+        run: |
+          if [ "${{ steps.compiled-cache.outputs.cache-hit }}" = "true" ]; then
+            echo "build_elapsed_seconds=0" >> "$GITHUB_ENV"
+          fi
+          test -x main/wrf.exe
+          test -x main/ideal.exe
+          ln -sfn ../../main/wrf.exe test/em_quarter_ss/wrf.exe
+          ln -sfn ../../main/ideal.exe test/em_quarter_ss/ideal.exe
+          test -x test/em_quarter_ss/wrf.exe
+          test -x test/em_quarter_ss/ideal.exe
+          echo "Executables verified; cache restored: ${{ steps.compiled-cache.outputs.cache-hit }}"
+
+      - name: Inicializar e rodar supercelula idealizada
         working-directory: wrf-src/test/em_quarter_ss
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          p = Path("namelist.input")
-          s = p.read_text()
-          s, n1 = re.subn(r"(?m)^(\s*run_minutes\s*=)\s*60,", r"\g<1> 30,", s)
-          s, n2 = re.subn(r"(?m)^(\s*end_minute\s*=)\s*120,\s*120,\s*120,", r"\g<1> 30, 30, 30,", s)
-          s, n3 = re.subn(r"(?m)^(\s*history_interval\s*=)\s*30,\s*10,\s*10,", r"\g<1> 10, 10, 10,", s)
-          if (n1, n2, n3) != (1, 1, 1):
-              raise SystemExit("Original WRF namelist did not match known version")
-          p.write_text(s)
-          PY
+          python3 "$GITHUB_WORKSPACE/scripts/prepare_ideal.py" \
+            --namelist namelist.input \
+            --duration "$PALMAS_DURATION" \
+            --grid "$PALMAS_GRID" \
+            --history "$PALMAS_HISTORY"
           start="$(date +%s)"
           if ! ./ideal.exe > "$GITHUB_WORKSPACE/ideal.log" 2>&1; then
             tail -n 100 "$GITHUB_WORKSPACE/ideal.log"
@@ -110,7 +151,8 @@ jobs:
           test -s wrfinput_d01
           echo "ideal_elapsed_seconds=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
           start="$(date +%s)"
-          if ! ./wrf.exe > "$GITHUB_WORKSPACE/integration.log" 2>&1; then
+          if ! /usr/bin/time -v -o "$GITHUB_WORKSPACE/wrf-resources.txt" \
+                  ./wrf.exe > "$GITHUB_WORKSPACE/integration.log" 2>&1; then
             tail -n 100 "$GITHUB_WORKSPACE/integration.log"
             tail -n 100 rsl.error.0000 2>/dev/null || true
             exit 1
@@ -127,12 +169,23 @@ jobs:
         run: |
           python3 -m pip install --user --break-system-packages netCDF4 numpy matplotlib
           python3 scripts/plot_ideal.py --run-dir wrf-src/test/em_quarter_ss --out-dir results/ideal-supercell
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          d = json.loads(Path("results/ideal-supercell/summary.json").read_text())
+          duration = int(os.environ["PALMAS_DURATION"])
+          assert d["frame_count"] >= 2, f"Only {d['frame_count']} frame(s)"
+          assert d["simulated_minutes"] == duration, (d["simulated_minutes"], duration)
+          print("Validated:", d["frame_count"], "frames,", duration, "minutes simulated.")
+          PY
 
       - name: Registrar tempos
         if: always()
         run: |
           echo "# WRF PALMAS - teste da supercelula idealizada" > test-report.txt
-          echo "WRF 4.8.0 / em_quarter_ss / 2km / 42x42 / 30 minutos meteorologicos" >> test-report.txt
+          echo "WRF 4.8.0 / em_quarter_ss / 2km / ${PALMAS_GRID}x${PALMAS_GRID} / ${PALMAS_DURATION} minutos meteorologicos" >> test-report.txt
+          echo "Cache WRF: ${{ steps.compiled-cache.outputs.cache-hit }}" >> test-report.txt
+          echo "History interval (min): $PALMAS_HISTORY" >> test-report.txt
           echo "Compilacao (segundos): $build_elapsed_seconds" >> test-report.txt
           echo "Inicializador (segundos): $ideal_elapsed_seconds" >> test-report.txt
           echo "Integracao WRF (segundos): $integration_elapsed_seconds" >> test-report.txt
@@ -143,7 +196,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: WRF-PALMAS-primeira-supercelula
+          name: WRF-PALMAS-v0-2-supercelula
           path: |
             results/ideal-supercell/
             test-report.txt
@@ -151,6 +204,7 @@ jobs:
             configure.log
             compile.log
             wrf-src/configure.wrf
+            wrf-resources.txt
             ideal.log
             integration.log
             wrf-src/test/em_quarter_ss/rsl.error.0000

@@ -1,0 +1,263 @@
+name: WRF PALMAS V0.5 - GFS real Sul do Brasil
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/real-gfs-v05.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  regional-real-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      NETCDF: /usr
+      NETCDF_C: /usr
+      OMP_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar NetCDF Fortran e ferramentas do WPS
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            gfortran gcc g++ make m4 csh perl curl netcdf-bin \
+            libnetcdf-dev libnetcdff-dev libhdf5-dev libpng-dev zlib1g-dev
+          echo "NetCDF-Fortran libraries:"
+          nf-config --flibs
+          test "$(nf-config --has-nc4)" = yes
+          df -h .
+
+      - name: Selecionar ciclo GFS de ontem as 12Z
+        run: |
+          echo "GFS_DAY=$(date -u -d yesterday +%Y%m%d)" >> "$GITHUB_ENV"
+          echo "GFS_START=$(date -u -d yesterday +%Y-%m-%d)T12:00" >> "$GITHUB_ENV"
+          echo "GFS cycle is previous UTC date at 12Z; historical test, NOT real-time forecast"
+
+      - name: Baixar GRIB2 regionais NOAA GFS f000 e f003
+        run: |
+          python3 scripts/download_gfs.py --day "$GFS_DAY" --cycle 12 --out gfs
+          du -sh gfs
+          file gfs/*
+
+      - name: Dados estaticos WPS baixa resolucao para teste
+        run: |
+          mkdir -p geog
+          curl -fL --retry 3 --connect-timeout 30 --max-time 900 \
+            https://www2.mmm.ucar.edu/wrf/src/wps_files/geog_low_res_mandatory.tar.gz \
+            -o geog-min.tar.gz
+          tar -xzf geog-min.tar.gz -C geog
+          find geog -type d -name topo_gmted2010_5m -print -quit > geog-location.txt
+          test -s geog-location.txt || { echo "Geographic topo_gmted2010_5m missing"; exit 1; }
+          geogdir="$(realpath "$(dirname "$(head -n 1 geog-location.txt)")")"
+          echo "PALMAS_GEOG=$geogdir" >> "$GITHUB_ENV"
+          du -sh geog
+          df -h .
+
+      - name: Baixar WRF 4.8 e WPS 4.7 oficiais
+        run: |
+          curl -fL --retry 3 \
+            https://github.com/wrf-model/WRF/releases/download/v4.8.0/v4.8.0.tar.gz \
+            -o WRF.tar.gz
+          curl -fL --retry 3 \
+            https://github.com/wrf-model/WPS/archive/refs/tags/v4.7.0.tar.gz \
+            -o WPS.tar.gz
+          mkdir wrf-src wps-src
+          tar -xf WRF.tar.gz --strip-components=1 -C wrf-src
+          tar -xf WPS.tar.gz --strip-components=1 -C wps-src
+          test -f wrf-src/configure && test -f wps-src/configure
+
+      - name: Reutilizar WRF em_real completo quando possivel
+        id: real-cache
+        uses: actions/cache@v4
+        with:
+          path: wrf-src
+          key: palmas-real-wrf480-ubuntu2404-netcdf-build-v1
+
+      - name: Compilar WRF em_real serial (primeira vez)
+        if: steps.real-cache.outputs.cache-hit != 'true'
+        working-directory: wrf-src
+        run: |
+          printf '%s\n' -1 | ./configure arw > ../wrf-options.log 2>&1 || true
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path("../wrf-options.log").read_text()
+          for line in text.splitlines():
+              if "GNU (gfortran/gcc)" in line:
+                  match = re.search(r"\b(\d+)\.\s+\(serial\)", line)
+                  if match:
+                      Path("../wrf-choice").write_text(match.group(1))
+                      print("Selected", line.strip())
+                      break
+          else:
+              print(text[-7000:])
+              raise SystemExit("WRF GNU serial option missing")
+          PY
+          printf '%s\n%s\n' "$(cat ../wrf-choice)" 0 | ./configure arw > ../wrf-configure.log 2>&1
+          test -f configure.wrf
+          grep -q -- '-lnetcdff' configure.wrf
+          start="$(date +%s)"
+          ./compile em_real -j 2 > ../wrf-compile.log 2>&1 || {
+            tail -n 100 ../wrf-compile.log; exit 1;
+          }
+          echo "WRF_BUILD_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+          test -x main/wrf.exe && test -x main/real.exe || {
+            tail -n 110 ../wrf-compile.log; exit 1;
+          }
+
+      - name: Verificar bibliotecas do motor WRF real
+        run: |
+          test -x wrf-src/main/wrf.exe
+          test -x wrf-src/main/real.exe
+          test -s wrf-src/external/io_netcdf/libwrfio_nf.a
+          test -s wrf-src/external/io_int/libwrfio_int.a
+          echo "Full em_real WRF ready"
+
+      - name: Compilar WPS geogrid ungrib metgrid
+        working-directory: wps-src
+        run: |
+          export WRF_DIR="$GITHUB_WORKSPACE/wrf-src"
+          printf '%s\n' -1 | ./configure --build-grib2-libs > ../wps-options.log 2>&1 || true
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path("../wps-options.log").read_text()
+          for line in text.splitlines():
+              if "(serial)" in line and ("gfortran" in line.lower() or "gnu" in line.lower()):
+                  match = re.search(r"^\s*(\d+)\.", line)
+                  if match:
+                      Path("../wps-choice").write_text(match.group(1))
+                      print("Selected", line.strip())
+                      break
+          else:
+              print(text[-8000:])
+              raise SystemExit("WPS serial GNU option missing")
+          PY
+          printf '%s\n' "$(cat ../wps-choice)" | ./configure --build-grib2-libs > ../wps-configure.log 2>&1 || {
+            tail -n 110 ../wps-configure.log; exit 1;
+          }
+          test -f configure.wps
+          start="$(date +%s)"
+          ./compile > ../wps-compile.log 2>&1 || {
+            tail -n 110 ../wps-compile.log; exit 1;
+          }
+          echo "WPS_BUILD_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+          for bin in geogrid.exe ungrib.exe metgrid.exe; do
+            test -x "$bin" || { echo "Missing WPS binary $bin"; tail -n 100 ../wps-compile.log; exit 1; }
+          done
+
+      - name: Calcular geografia e condicoes iniciais GFS
+        working-directory: wps-src
+        run: |
+          python3 "$GITHUB_WORKSPACE/scripts/make_namelists.py" \
+            --start "$GFS_START" --hours 3 --grid 81 --dx-km 9 \
+            --lat -27.3 --lon -52.3 --geog "$PALMAS_GEOG" \
+            --out "$GITHUB_WORKSPACE/pilot"
+          cp "$GITHUB_WORKSPACE/pilot/namelist.wps" namelist.wps
+          ln -sfn ungrib/Variable_Tables/Vtable.GFS Vtable
+          ./geogrid.exe > "$GITHUB_WORKSPACE/geogrid.log" 2>&1 || {
+            tail -n 90 "$GITHUB_WORKSPACE/geogrid.log"; exit 1;
+          }
+          test -s geo_em.d01.nc
+          ./link_grib.csh "$GITHUB_WORKSPACE"/gfs/gfs.t*.pgrb2.0p25.f*
+          ./ungrib.exe > "$GITHUB_WORKSPACE/ungrib.log" 2>&1 || {
+            tail -n 90 "$GITHUB_WORKSPACE/ungrib.log"; exit 1;
+          }
+          ./metgrid.exe > "$GITHUB_WORKSPACE/metgrid.log" 2>&1 || {
+            tail -n 90 "$GITHUB_WORKSPACE/metgrid.log"; exit 1;
+          }
+          ls -lh met_em.d01.*.nc
+
+      - name: Iniciar meteorologia real com real.exe
+        working-directory: wrf-src/test/em_real
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          start = os.environ["GFS_START"].replace("T", "_") + ":00"
+          path = Path(os.environ["GITHUB_WORKSPACE"]) / "wps-src" / ("met_em.d01." + start + ".nc")
+          if not path.is_file(): raise SystemExit(f"Missing met_em file: {path}")
+          print(path)
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"FIRST_MET_EM={path}\n")
+          PY
+          python3 "$GITHUB_WORKSPACE/scripts/make_namelists.py" \
+            --start "$GFS_START" --hours 3 --grid 81 --dx-km 9 \
+            --lat -27.3 --lon -52.3 --geog "$PALMAS_GEOG" \
+            --met-em "$FIRST_MET_EM" --out "$GITHUB_WORKSPACE/pilot"
+          cp "$GITHUB_WORKSPACE/pilot/namelist.input" namelist.input
+          ln -sfn ../../main/real.exe real.exe
+          ln -sfn ../../main/wrf.exe wrf.exe
+          ln -sf "$GITHUB_WORKSPACE"/wps-src/met_em.d01.*.nc ./
+          ulimit -s unlimited
+          start="$(date +%s)"
+          ./real.exe > "$GITHUB_WORKSPACE/real.log" 2>&1 || {
+            tail -n 110 "$GITHUB_WORKSPACE/real.log"; exit 1;
+          }
+          echo "REAL_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+          test -s wrfinput_d01 && test -s wrfbdy_d01
+
+      - name: Simular tres horas com GFS
+        working-directory: wrf-src/test/em_real
+        run: |
+          ulimit -s unlimited
+          start="$(date +%s)"
+          /usr/bin/time -v -o "$GITHUB_WORKSPACE/wrf-real-resources.txt" \
+            ./wrf.exe > "$GITHUB_WORKSPACE/wrf-real.log" 2>&1 || {
+            tail -n 110 "$GITHUB_WORKSPACE/wrf-real.log"; exit 1;
+          }
+          echo "WRF_REAL_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+          grep -q "SUCCESS COMPLETE WRF" "$GITHUB_WORKSPACE/wrf-real.log" || \
+            grep -q "SUCCESS COMPLETE WRF" rsl.out.0000 || {
+              tail -n 90 "$GITHUB_WORKSPACE/wrf-real.log"; exit 1;
+            }
+          ls -lh wrfout_d01_*
+
+      - name: Plotar mapas geograficos de temperatura e vento
+        run: |
+          python3 -m pip install --user --break-system-packages numpy netCDF4 matplotlib pillow
+          python3 scripts/plot_real_v05.py --run-dir wrf-src/test/em_real --out-dir results/v05
+          test -s results/v05/summary.json
+
+      - name: Relatorio de tempos
+        if: always()
+        run: |
+          echo "# WRF PALMAS V0.5 | Piloto GFS real" > v05-report.txt
+          echo "Dataset: GFS ($GFS_DAY 12Z), 9km, 3h" >> v05-report.txt
+          echo "WRF build (sec): $WRF_BUILD_SECONDS" >> v05-report.txt
+          echo "WPS build (sec): $WPS_BUILD_SECONDS" >> v05-report.txt
+          echo "real.exe (sec): $REAL_SECONDS" >> v05-report.txt
+          echo "wrf.exe (sec): $WRF_REAL_SECONDS" >> v05-report.txt
+          echo "LOW RES STATIC GEOGRAPHY: benchmark only, not operational" >> v05-report.txt
+          cat v05-report.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publicar resultados/logs ou diagnostico de falha
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WRF-PALMAS-V05-REAL-GFS
+          path: |
+            results/v05/
+            v05-report.txt
+            pilot/
+            wrf-options.log
+            wrf-configure.log
+            wrf-compile.log
+            wps-options.log
+            wps-configure.log
+            wps-compile.log
+            geogrid.log
+            ungrib.log
+            metgrid.log
+            real.log
+            wrf-real.log
+            wrf-real-resources.txt
+            wps-src/geogrid.log.0000
+            wps-src/metgrid.log.0000
+            wrf-src/test/em_real/rsl.error.0000
+          retention-days: 7
+          if-no-files-found: warn

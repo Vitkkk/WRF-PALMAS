@@ -1,0 +1,19 @@
+# WRF PALMAS: keep binaries and weather data out of source control.
+runs/
+work/
+*.nc
+*.grb
+*.grib
+*.grb2
+*.grib2
+GRIBFILE.*
+FILE:*
+rsl.out.*
+rsl.error.*
+wrf.exe
+real.exe
+*.o
+*.mod
+__pycache__/
+*.pyc
+.DS_Store

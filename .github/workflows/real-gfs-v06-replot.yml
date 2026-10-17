@@ -1,0 +1,41 @@
+name: WRF PALMAS V0.6 - replot sem simular
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Run ID de V0.6 que guardou WRF-PALMAS-V06-WRFOUT-RAW"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replot-raw-wrfout:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Recuperar NetCDF da previsao ja concluida
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.source_run_id }}
+          name: WRF-PALMAS-V06-WRFOUT-RAW
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: raw
+      - name: Instalar plotagem sem instalar WRF/WPS
+        run: |
+          python3 -m pip install --user --break-system-packages numpy netCDF4 matplotlib pillow cartopy
+      - name: Gerar mapas e GIFs sem integrar atmosfera
+        run: |
+          ls -lh raw/wrfout_d01_*
+          python3 scripts/plot_real_v06.py --run-dir raw --out-dir results/v06
+          test -s results/v06/summary.json
+      - name: Publicar mapas refeitos
+        uses: actions/upload-artifact@v4
+        with:
+          name: WRF-PALMAS-V06-REPLOT-MAPAS
+          path: results/v06/
+          retention-days: 7

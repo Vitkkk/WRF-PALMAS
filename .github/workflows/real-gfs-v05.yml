@@ -1,4 +1,4 @@
-name: WRF PALMAS V0.5 - GFS real Sul do Brasil
+name: WRF PALMAS V0.6 - GFS mapas com fronteiras
 
 on:
   workflow_dispatch:
@@ -358,18 +358,34 @@ jobs:
             }
           ls -lh wrfout_d01_*
 
-      - name: Guardar wrfout para plotagens SEM nova simulacao
+      - name: Guardar wrfout bruto em artefato independente ANTES dos mapas
+        uses: actions/upload-artifact@v4
+        with:
+          name: WRF-PALMAS-V06-WRFOUT-RAW
+          path: wrf-src/test/em_real/wrfout_d01_*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Guardar wrfout para replotagens futuras
         uses: actions/cache/save@v4
         with:
           path: wrf-src/test/em_real/wrfout_d01_*
-          # Same cycle, grid, resolution, physics and WRF version; bump v1 if any change.
-          key: palmas-v05-wrfout-${{ env.GFS_DAY }}-12z-9km-81-lowres-thompson-v1
+          key: palmas-v06-wrfout-${{ env.GFS_DAY }}-12z-9km-81-lowres-30min-v1
 
-      - name: Plotar mapas geograficos de temperatura e vento
+      - name: Plotar V0.6 com mapa, fronteiras, cidades, chuva, GIF
         run: |
-          python3 -m pip install --user --break-system-packages numpy netCDF4 matplotlib pillow
-          python3 scripts/plot_real_v05.py --run-dir wrf-src/test/em_real --out-dir results/v05
-          test -s results/v05/summary.json
+          python3 -m pip install --user --break-system-packages numpy netCDF4 matplotlib pillow cartopy
+          python3 scripts/plot_real_v06.py --run-dir wrf-src/test/em_real --out-dir results/v06
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          folder = Path("results/v06")
+          result = json.loads((folder/"summary.json").read_text())
+          assert result["num_times"] == 7, result["num_times"]
+          for name in ("t2", "rain"):
+              assert (folder/"gifs"/(name+"_anim.gif")).stat().st_size > 1024
+          print(result["gif_products"], result["unavailable"])
+          PY
 
       - name: Relatorio de tempos
         if: always()
@@ -383,13 +399,13 @@ jobs:
           echo "LOW RES STATIC GEOGRAPHY: benchmark only, not operational" >> v05-report.txt
           cat v05-report.txt >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publicar resultados/logs ou diagnostico de falha
+      - name: Publicar V0.6 ou diagnostico de falha
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: WRF-PALMAS-V05-REAL-GFS
+          name: WRF-PALMAS-V06-MAPAS-GFS
           path: |
-            results/v05/
+            results/v06/
             v05-report.txt
             pilot/
             wrf-options.log

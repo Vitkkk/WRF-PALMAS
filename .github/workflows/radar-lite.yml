@@ -1,0 +1,75 @@
+name: WRF PALMAS - Radar Lite 0.1 (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/radar_lite.py'
+      - 'scripts/arht_lite_preflight.py'
+      - 'tests/test_radar_lite.py'
+      - '.github/workflows/radar-lite.yml'
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "DEMO analitica ou WRFOUT real de uma execucao V0.6"
+        required: true
+        type: choice
+        default: demo
+        options:
+          - demo
+          - wrfout
+      source_run_id:
+        description: "Run ID com artifact WRF-PALMAS-V06-WRFOUT-RAW (para wrfout)"
+        required: false
+        type: string
+        default: ""
+      elevation:
+        description: "Elevacao do feixe em graus"
+        type: choice
+        required: true
+        default: "0.5"
+        options:
+          - "0.5"
+          - "1.5"
+          - "2.5"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  radar-lite:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar apenas dependencias de pos-processamento (sem CUDA/WRF)
+        run: python3 -m pip install --user --break-system-packages numpy netCDF4 matplotlib pillow
+      - name: Validar codigo CPU e checks de origem
+        run: python3 -m unittest tests/test_radar_lite.py -v
+      - name: Recuperar WRFOUT existente (somente se solicitado)
+        if: ${{ inputs.source == 'wrfout' }}
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.source_run_id }}
+          name: WRF-PALMAS-V06-WRFOUT-RAW
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: raw
+      - name: Renderizar DEMO — nao e WRF
+        if: ${{ inputs.source != 'wrfout' }}
+        run: |
+          python3 scripts/radar_lite.py --demo --out-dir results/radar-lite \
+            --elevation '${{ inputs.elevation || '0.5' }}' --max-frames 8
+      - name: Renderizar refletividade WRF sem recompilar modelo
+        if: ${{ inputs.source == 'wrfout' }}
+        run: |
+          test -n '${{ inputs.source_run_id }}'
+          python3 scripts/radar_lite.py --run-dir raw --out-dir results/radar-lite \
+            --elevation '${{ inputs.elevation }}' --max-frames 12
+      - name: Publicar diagnostico e GIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WRF-PALMAS-RADAR-LITE-01
+          path: results/radar-lite/
+          retention-days: 7
+          if-no-files-found: warn

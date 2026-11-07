@@ -2,6 +2,19 @@
 
 Modelo meteorológico regional experimental para estudos de convecção e tempo severo na América do Sul, nomeado em homenagem às vítimas do tornado de Palmas (PR) de 1959.
 
+## 7 de novembro de 2026 — rodada real PR + SC (aniversário do outbreak de 2025)
+
+[**Rodada inaugural especial — GitHub Actions**](.github/workflows/pr-sc-nov7-inaugural.yml) • [Execução #42377826940](https://github.com/Vitkkk/WRF-PALMAS/actions/runs/42377826940)
+
+Foi configurado um teste regional **real-data** WRF-ARW 4.8.0 alimentado pelo **GFS 06Z**, usando condições válidas às 12Z, 15Z e 18Z de 07/11/2026. A grade é **151 × 141, 6 km, 42 níveis**, centrada em **26°S 51,5°W**, previsão **12–18Z** com saídas a cada **30 minutos** (até 13 horários). O ensaio investiga PR/SC e arredores sem prometer resolver a dinâmica de tornados individuais a 6 km.
+
+- **Física experimental:** Thompson microphysics (8), Noah LSM, YSU, RRTMG e `cu_physics=0`; 6 km é uma resolução de transição e requer testes de sensibilidade.
+- **Campos:** refletividade nativa `REFL_10CM` com `do_radar_ref=1`; temperatura, vento, chuva acumulada; **shear bulk ~0–1 e ~0–6 km AGL** pela interpolação das componentes U/V; **SBCAPE/SBCIN** calculados via MetPy em pontos espaçados por 12 células (~72 km), identificados claramente como amostragem grosseira.
+- **Segurança contra falhas:** salva o `WRF-PALMAS-PRSC-7NOV-WRFOUT-RAW` antes dos mapas. O [replot independente](.github/workflows/pr-sc-nov7-replot.yml) pode refazer as figuras e GIFs sem rerodar WRF depois do primeiro NetCDF estar disponível.
+- **Limitação:** é uma primeira integração de **6 h**, não um outlook válido por 24 h, nem produto verificado de risco ou alerta.
+
+O tempo de execução é medido pelo workflow; a conclusão precisa ser confirmada no Actions. A resolução geográfica WPS usada é **lowres**, exclusiva para teste de infraestrutura.
+
 ## Estado do projeto
 
 **V0.4 — laboratório de supercélulas idealizadas em funcionamento.** Este repositório contém geradores de configurações WRF/WPS e workflows no GitHub Actions que já concluíram integrações ideais de supercélulas. A V0.4 adiciona mapas de W, vorticidade e refletividade de chuva aproximada em três painéis, além de uma grade ampliada. **Ainda não executa previsão operacional nem simulação regional alimentada por GFS.**

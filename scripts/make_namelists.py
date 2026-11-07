@@ -69,11 +69,14 @@ def create_files(
     out: Path, start: datetime, hours: int, geog: str, grid: int,
     dx_km: int, lat: float, lon: float, cumulus: int,
     met_levels: int, soil_levels: int,
+    grid_y: int | None = None, vert_levels: int = 35,
+    history_minutes: int = 30, radar: bool = False,
 ) -> None:
     end = start + timedelta(hours=hours)
     initial = start.strftime("%Y-%m-%d_%H:%M:%S")
     final = end.strftime("%Y-%m-%d_%H:%M:%S")
     dx = dx_km * 1000
+    grid_y = grid_y or grid
     # Conservative starter value, not a universal CFL guarantee.
     time_step = dx_km * 4
 
@@ -95,7 +98,7 @@ def create_files(
  i_parent_start = 1,
  j_parent_start = 1,
  e_we = {grid},
- e_sn = {grid},
+ e_sn = {grid_y},
  geog_data_res = 'lowres',
  dx = {dx},
  dy = {dx},
@@ -133,7 +136,7 @@ def create_files(
  end_hour = {end.hour},
  interval_seconds = 10800,
  input_from_file = .true.,
- history_interval = 30,
+ history_interval = {history_minutes},
  frames_per_outfile = 1,
  restart = .false.,
  io_form_history = 2,
@@ -145,8 +148,8 @@ def create_files(
  time_step = {time_step},
  max_dom = 1,
  e_we = {grid},
- e_sn = {grid},
- e_vert = 35,
+ e_sn = {grid_y},
+ e_vert = {vert_levels},
  p_top_requested = 5000,
  num_metgrid_levels = {met_levels},
  num_metgrid_soil_levels = {soil_levels},
@@ -163,6 +166,7 @@ def create_files(
 /
 &physics
  mp_physics = 8,
+ do_radar_ref = {int(radar)},
  ra_lw_physics = 4,
  ra_sw_physics = 4,
  radt = 15,
@@ -210,7 +214,9 @@ def create_files(
     metadata = {
         "project": "WRF PALMAS", "profile": "smoke", "start_utc": start.isoformat(),
         "end_utc": end.isoformat(), "hours": hours,
-        "grid_cells": [grid, grid], "spacing_km": dx_km,
+        "grid_cells": [grid, grid_y], "spacing_km": dx_km,
+        "vert_levels": vert_levels, "radar_reflectivity": radar,
+        "history_minutes": history_minutes,
         "domain_center": [lat, lon], "cumulus_scheme": cumulus,
         "metgrid_levels": met_levels, "soil_levels": soil_levels,
         "warning": "Only namelists generated. WRF/WPS and real weather data are required.",
@@ -226,6 +232,10 @@ def main() -> None:
     parser.add_argument("--geog", required=True, help="Existing WPS static geography directory")
     parser.add_argument("--out", type=Path, default=Path("runs/palmas-smoke"))
     parser.add_argument("--grid", type=int, default=81)
+    parser.add_argument("--grid-y", type=int, default=None)
+    parser.add_argument("--vert-levels", type=int, default=35)
+    parser.add_argument("--history-minutes", type=int, choices=(15, 30, 60), default=30)
+    parser.add_argument("--radar", action="store_true", help="Output WRF native REFL_10CM using do_radar_ref=1")
     parser.add_argument("--dx-km", type=int, default=9)
     parser.add_argument("--lat", type=float, default=-27.3)
     parser.add_argument("--lon", type=float, default=-52.3)
@@ -240,6 +250,10 @@ def main() -> None:
 
     if args.grid < 31 or args.grid > 301:
         parser.error("--grid must be between 31 and 301 for initial experiments")
+    if args.grid_y is not None and not (31 <= args.grid_y <= 301):
+        parser.error("--grid-y must be between 31 and 301")
+    if not 30 <= args.vert_levels <= 65:
+        parser.error("--vert-levels must be between 30 and 65")
     if args.dx_km < 3 or args.dx_km > 27:
         parser.error("--dx-km must be between 3 and 27")
     if not (-90 <= args.lat <= 90 and -180 <= args.lon <= 180):
@@ -250,7 +264,9 @@ def main() -> None:
         levels = (levels_from_met_em(args.met_em) if args.met_em else
                   (args.met_levels, args.soil_levels))
         create_files(args.out, args.start, args.hours, args.geog, args.grid,
-                     args.dx_km, args.lat, args.lon, args.cumulus, *levels)
+                     args.dx_km, args.lat, args.lon, args.cumulus, *levels,
+                     grid_y=args.grid_y, vert_levels=args.vert_levels,
+                     history_minutes=args.history_minutes, radar=args.radar)
     except ValueError as exc:
         parser.error(str(exc))
     print(f"Created namelist.wps, namelist.input and config.json in {args.out}")

@@ -60,5 +60,15 @@ if __name__ == "__main__":
     p.add_argument("--day", required=True, help="YYYYMMDD UTC date")
     p.add_argument("--cycle", default="12", choices=("00", "06", "12", "18"))
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--forecast-hours", default="0,3",
+                   help="Comma-separated GFS forecast hours, e.g. 6,9,12")
+    p.add_argument("--pr-sc", action="store_true",
+                   help="Subset GRIB2 to PR and SC with meteorological padding")
     a = p.parse_args()
-    download(a.day, a.cycle, a.out)
+    hours = tuple(int(h.strip()) for h in a.forecast_hours.split(","))
+    if not hours or any(h < 0 or h > 120 or h % 3 for h in hours):
+        p.error("Forecast hours must be multiples of 3 between 0 and 120")
+    if a.pr_sc:
+        BOX.update({"leftlon": 302, "rightlon": 316, "toplat": -19,
+                    "bottomlat": -33})
+    download(a.day, a.cycle, a.out, hours)

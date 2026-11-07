@@ -197,7 +197,7 @@ def plot_run(run_dir: Path, out_dir: Path):
                                   transform=projection, scale=270,
                                   width=0.0025, zorder=7)
                     ax.set_title(f"WRF PALMAS V0.6 — {heading}\n"
-                                 f"{timestamp} UTC | GFS → WRF 9 km | EXPERIMENTAL",
+                                 f"{timestamp} UTC | GFS → WRF {int(round(float(ds.getncattr('DX')) / 1000))} km | EXPERIMENTAL",
                                  fontsize=12)
                     dest = out_dir / label / f"{label}_{current:03}.png"
                     dest.parent.mkdir(parents=True, exist_ok=True)

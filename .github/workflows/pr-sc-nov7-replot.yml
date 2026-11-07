@@ -1,0 +1,46 @@
+name: WRF PALMAS PR SC - Replot sem simular atmosfera
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "ID do workflow inaugural com artefato NetCDF bruto (WRF-PALMAS-PRSC-7NOV-WRFOUT-RAW)"
+        required: true
+        default: "42377826940"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  regenerate-maps-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Baixar NetCDF da simulacao existente
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: WRF-PALMAS-PRSC-7NOV-WRFOUT-RAW
+          path: saved
+      - name: Instalar apenas pos-processamento Python
+        run: |
+          python3 -m pip install --break-system-packages numpy netCDF4 matplotlib pillow cartopy metpy
+      - name: Gerar campos basicos e GIFs
+        run: |
+          test -n "$(find saved -maxdepth 1 -name 'wrfout_d01_*' -print -quit)"
+          python3 scripts/plot_real_v06.py --run-dir saved --out-dir results/prsc/basic
+      - name: Gerar cisalhamento refletividade e SBCAPE
+        run: |
+          python3 scripts/plot_severe_pr_sc.py --run-dir saved --out-dir results/prsc/severe
+      - name: Guardar mapas sem rerodar WRF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WRF-PALMAS-PRSC-REPLOT-SEM-RERODAR
+          path: results/prsc/
+          retention-days: 7
+          if-no-files-found: warn

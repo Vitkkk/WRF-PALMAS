@@ -319,7 +319,15 @@ jobs:
             wps-src/met_em.d01.*.nc
           key: palmas-prsc-metem-${{ env.GFS_DAY }}-06z-6km-151x141-12to18z-v1
 
+      - name: Restaurar wrfout anterior do MESMO ciclo, grade e fisica
+        id: wrfout-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: wrf-src/test/em_real/wrfout_d01_*
+          key: palmas-prsc-wrfout-${{ env.GFS_DAY }}-06z-6km-151x141-12to18z-v1
+
       - name: Iniciar meteorologia real com real.exe
+        if: steps.wrfout-cache.outputs.cache-hit != 'true'
         working-directory: wrf-src/test/em_real
         run: |
           export FIRST_MET_EM="$(python3 - <<'PY'
@@ -349,6 +357,7 @@ jobs:
           test -s wrfinput_d01 && test -s wrfbdy_d01
 
       - name: Simular seis horas PR-SC com GFS 06Z
+        if: steps.wrfout-cache.outputs.cache-hit != 'true'
         working-directory: wrf-src/test/em_real
         run: |
           ulimit -s unlimited
@@ -364,19 +373,56 @@ jobs:
             }
           ls -lh wrfout_d01_*
 
-      - name: Guardar wrfout bruto em artefato independente ANTES dos mapas
-        uses: actions/upload-artifact@v4
-        with:
-          name: WRF-PALMAS-PRSC-7NOV-WRFOUT-RAW
-          path: wrf-src/test/em_real/wrfout_d01_*
-          if-no-files-found: error
-          retention-days: 7
+      - name: Validar 13 NetCDF completos antes de salvar checkpoints
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          files = sorted(Path("wrf-src/test/em_real").glob("wrfout_d01_*"))
+          if len(files) != 13:
+              raise SystemExit(f"Expected 13 WRF history files, got {len(files)}")
+          for f in files:
+              if f.stat().st_size < 1024 * 1024:
+                  raise SystemExit(f"Empty/incomplete NetCDF: {f}")
+          print(f"Validated {len(files)} NetCDF history files")
+          PY
 
-      - name: Guardar wrfout para replotagens futuras
+      - name: Salvar PRIMEIRO cache do wrfout original caso falhe upload/plotagem
+        if: steps.wrfout-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: wrf-src/test/em_real/wrfout_d01_*
           key: palmas-prsc-wrfout-${{ env.GFS_DAY }}-06z-6km-151x141-12to18z-v1
+
+      - name: Copiar e renomear NetCDF para upload sem dois-pontos NTFS
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from shutil import copy2
+          import json
+          root = Path("wrf-src/test/em_real")
+          export = Path("wrfout-export")
+          export.mkdir(exist_ok=True)
+          manifest = []
+          for original in sorted(root.glob("wrfout_d01_*")):
+              safe = original.name.replace(":", "-") + ".nc"
+              if ":" in safe or len(safe) < 25:
+                  raise RuntimeError(f"Unsafe exported filename: {safe}")
+              copy2(original, export / safe)
+              manifest.append({"native": original.name, "download": safe,
+                               "bytes": original.stat().st_size})
+          if len(manifest) != 13:
+              raise RuntimeError(f"Unexpected history count: {len(manifest)}")
+          (export / "file-map.json").write_text(json.dumps(manifest, indent=2))
+          print(f"Ready to upload {len(manifest)} safe-named WRF NetCDF files")
+          PY
+
+      - name: Guardar wrfout bruto em artefato independente ANTES dos mapas
+        uses: actions/upload-artifact@v4
+        with:
+          name: WRF-PALMAS-PRSC-7NOV-WRFOUT-RAW
+          path: wrfout-export/
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Mapas PR SC com limites administrativos, temperatura, chuva e reflectividade
         run: |
